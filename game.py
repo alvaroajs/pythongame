@@ -1,269 +1,279 @@
-import pygame
-from random import randint, choice
-from math import sqrt
+import random
+import math
+from pygame import Rect
 
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1024
+HEIGHT = 720
+TITLE = "Survival Game: Final Version"
 
-pygame.mixer.init()
+COLOR_BG_MENU = (20, 20, 20)
+COLOR_BG_GAME = (28, 28, 32)
+COLOR_BG_GAMEOVER = (50, 10, 10)
+COLOR_BTN_NORMAL = (60, 60, 60)
+COLOR_BTN_HOVER = (100, 100, 100)
+COLOR_TEXT = (255, 255, 255)
 
-GAME_STATE = "MENU"
+STATE_MENU = "MENU"
+STATE_GAME = "GAME"
+STATE_GAMEOVER = "GAMEOVER"
+
+game_state = STATE_MENU
 sound_enabled = True
-
-def generate_beep(frequency=440, duration=0.08, volume=0.3):
-    sample_rate = 44100
-    n_samples = int(sample_rate * duration)
-    buf = bytearray()
-    for i in range(n_samples):
-        value = int(128 + volume * 127 * (
-            1.0 if (int(frequency * i / sample_rate * 2) % 2 == 0) else -1.0
-        ))
-        buf.append(max(0, min(255, value)))
-    return pygame.mixer.Sound(buffer=bytes(buf))
-
-hit_sound = generate_beep(600, 0.08, 0.4)
-menu_sound = generate_beep(350, 0.08, 0.3)
+score = 0
+score_timer = 0 
 
 
-def create_sprite(color, w, h, border_radius=6):
-    surf = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(surf, color, (0, 0, w, h), border_radius=border_radius)
-    pygame.draw.rect(surf, (255, 255, 255), (w // 4, h // 4, w // 8, h // 8))
-    pygame.draw.rect(surf, (255, 255, 255),
-                     (w * 3 // 4 - w // 8, h // 4, w // 8, h // 8))
-    return surf
-
-def sprite_animation(color1, color2, w, h):
-    return [create_sprite(color1, w, h), create_sprite(color2, w, h)]
+tactic_state = 0 
+tactic_timer = 0
+TACTIC_INTERVAL = 300
 
 class Button:
     def __init__(self, text, x, y, w, h):
         self.text = text
-        self.rect = pygame.Rect(x, y, w, h)
-        self.font = pygame.font.SysFont("Arial", 28)
-        self._mouse_prev = False
+        self.rect = Rect(x, y, w, h)
+        self.hovered = False
 
-    def draw(self, screen_surf):
-        mouse = pygame.mouse.get_pos()
-        color = (100, 100, 100) if self.rect.collidepoint(mouse) else (60, 60, 60)
-        pygame.draw.rect(screen_surf, color, self.rect, border_radius=8)
-        text_surf = self.font.render(self.text, True, (255, 255, 255))
-        screen_surf.blit(text_surf, (
-            self.rect.x + (self.rect.w - text_surf.get_width()) // 2,
-            self.rect.y + (self.rect.h - text_surf.get_height()) // 2))
+    def draw(self, screen):
+        color = COLOR_BTN_HOVER if self.hovered else COLOR_BTN_NORMAL
+        screen.draw.filled_rect(self.rect, color)
+        screen.draw.text(self.text, center=self.rect.center, fontsize=30, color=COLOR_TEXT)
 
-    def is_clicked(self):
-        mouse = pygame.mouse.get_pos()
-        pressed = pygame.mouse.get_pressed()[0]
-        clicked = pressed and (not self._mouse_prev) and self.rect.collidepoint(mouse)
-        self._mouse_prev = pressed
-        return clicked
+    def update(self, mouse_pos):
+        self.hovered = self.rect.collidepoint(mouse_pos)
 
+    def is_clicked(self, mouse_pos):
+        return self.rect.collidepoint(mouse_pos)
 
-class Hero:
+class GameActor(Actor):
+    def __init__(self, img_idle, img_walk, x, y):
+        super().__init__(img_idle, pos=(x, y))
+        self.img_idle = img_idle
+        self.img_walk = img_walk
+        self.frame_timer = 0
+        self.is_moving = False
+
+    def animate(self):
+        self.frame_timer += 1
+        if self.frame_timer > 10:
+            self.frame_timer = 0
+            if self.is_moving:
+                self.image = self.img_walk if self.image == self.img_idle else self.img_idle
+            else:
+                self.image = self.img_idle
+
+class Hero(GameActor):
     def __init__(self):
-        self.start_x = WIDTH // 2
-        self.start_y = HEIGHT // 2
-        self.x = self.start_x
-        self.y = self.start_y
+        super().__init__('hero_idle', 'hero_walk', WIDTH // 2, HEIGHT // 2)
         self.speed = 3
-        self.anim_idle = sprite_animation((0, 180, 255), (0, 140, 255), 40, 40)
-        self.anim_walk = sprite_animation((0, 255, 180), (0, 220, 140), 40, 40)
-        self.current = self.anim_idle
-        self.frame = 0
-        self.timer = 0
-
-    def reset(self):
-        self.x = self.start_x
-        self.y = self.start_y
-        self.current = self.anim_idle
-        self.frame = 0
-        self.timer = 0
 
     def update(self):
-        moving = False
-        if keyboard.left:
-            self.x -= self.speed; moving = True
-        if keyboard.right:
-            self.x += self.speed; moving = True
-        if keyboard.up:
-            self.y -= self.speed; moving = True
-        if keyboard.down:
-            self.y += self.speed; moving = True
+        self.is_moving = False
+        if keyboard.left and self.left > 0:
+            self.x -= self.speed; self.is_moving = True
+        if keyboard.right and self.right < WIDTH:
+            self.x += self.speed; self.is_moving = True
+        if keyboard.up and self.top > 0:
+            self.y -= self.speed; self.is_moving = True
+        if keyboard.down and self.bottom < HEIGHT:
+            self.y += self.speed; self.is_moving = True
+        self.animate()
 
-        self.x = max(0, min(WIDTH - 40, self.x))
-        self.y = max(0, min(HEIGHT - 40, self.y))
-
-        self.current = self.anim_walk if moving else self.anim_idle
-        self.timer += 1
-        if self.timer % 12 == 0:
-            self.frame = (self.frame + 1) % 2
-
-    def draw(self, surf):
-        surf.blit(self.current[self.frame], (self.x, self.y))
-
-class Enemy:
-    def __init__(self, x, y, etype="patrol"):
-        self.start_x = x
-        self.start_y = y
-        self.x = x
-        self.y = y
-        self.type = etype
-
-        self.speed = 1.8 if etype == "chaser" else 1.2
-
-        self.range_left = x - 80
-        self.range_right = x + 80
-        self.direction = 1
-
-        self.anim_idle = sprite_animation((255, 80, 80), (255, 40, 40), 35, 35)
-        self.anim_walk = sprite_animation((255, 160, 80), (255, 130, 40), 35, 35)
-        self.frame = 0
-        self.timer = 0
-
-    def update(self, hero):
-        if self.type == "static":
-            pass
-        elif self.type == "chaser":
-            dx = hero.x - self.x
-            dy = hero.y - self.y
-            dist = sqrt(dx * dx + dy * dy)
-            if dist < 240 and dist > 1:
-                self.x += self.speed * (dx / dist)
-                self.y += self.speed * (dy / dist)
-        else:
-            self.x += self.direction * self.speed
-            if self.x > self.range_right:
-                self.direction = -1
-            if self.x < self.range_left:
-                self.direction = 1
-
-        self.timer += 1
-        if self.timer % 18 == 0:
-            self.frame = (self.frame + 1) % 2
-
-    def draw(self, surf):
-        surf.blit(self.anim_walk[self.frame], (self.x, self.y))
+    def reset(self):
+        self.pos = (WIDTH // 2, HEIGHT // 2)
 
 
-def random_enemy_bundle():
-    enemies = []
-    types = ["static", "patrol", "chaser"]
+class Enemy(GameActor):
+    def __init__(self, x, y, index):
+        super().__init__('enemy_idle', 'enemy_walk', x, y)
+        self.index = index 
+        self.current_behavior = "zigzag" 
+        self.speed_chase = 1.4
+        self.speed_zigzag = 1.0
+        self.zz_dx = random.choice([-1, 1])
+        self.zz_dy = random.choice([-1, 1])
 
-    chasers = 0
+    def update_ai(self, target):
+        self.is_moving = True
+        
+        if self.current_behavior == "chaser":
+            dx = target.x - self.x
+            dy = target.y - self.y
+            dist = math.sqrt(dx**2 + dy**2)
+            if dist > 0:
+                self.x += (dx / dist) * self.speed_chase
+                self.y += (dy / dist) * self.speed_chase
+                
+        elif self.current_behavior == "zigzag":
+            self.x += self.zz_dx * self.speed_zigzag
+            self.y += self.zz_dy * self.speed_zigzag
+            
+            if self.left < 0:
+                self.x = 0; self.zz_dx = 1
+            if self.right > WIDTH:
+                self.x = WIDTH; self.zz_dx = -1
+            if self.top < 0:
+                self.y = 0; self.zz_dy = 1
+            if self.bottom > HEIGHT:
+                self.y = HEIGHT; self.zz_dy = -1
 
-    for _ in range(6):
-        x = randint(40, WIDTH - 40)
-        y = randint(40, HEIGHT - 40)
-        et = choice(types)
-
-        if chasers < 2:
-            et = "chaser"
-            chasers += 1
-
-        enemies.append(Enemy(x, y, et))
-
-    return enemies
+        self.animate()
 
 hero = Hero()
 enemies = []
-spawn_timer = 0
-score = 0
 
 
-switch_timer = 0
-switch_interval = randint(300, 600)   
+BTN_W = 200
+BTN_H = 50
+BTN_X = (WIDTH - BTN_W) // 2
 
-btn_start = Button("Start", 300, 200, 200, 50)
-btn_sound = Button("Som Ligado", 300, 280, 200, 50)
-btn_exit = Button("Sair", 300, 360, 200, 50)
+btn_start = Button("Começar", BTN_X, 250, BTN_W, BTN_H)
+btn_sound = Button("Som: Ligado", BTN_X, 330, BTN_W, BTN_H)
+btn_exit = Button("Sair", BTN_X, 410, BTN_W, BTN_H)
+
+RESTART_W = 300
+RESTART_X = (WIDTH - RESTART_W) // 2
+
+btn_restart = Button("Voltar ao Menu", RESTART_X, 400, RESTART_W, 50)
+
+def spawn_enemies():
+    new_enemies = []
+    for i in range(5):
+        x = random.randint(50, WIDTH - 50)
+        y = random.randint(50, HEIGHT - 50)
+        while abs(x - hero.x) < 150 and abs(y - hero.y) < 150:
+            x = random.randint(50, WIDTH - 50)
+            y = random.randint(50, HEIGHT - 50)
+        new_enemies.append(Enemy(x, y, i))
+    apply_tactics(new_enemies)
+    return new_enemies
+
+def apply_tactics(enemy_list):
+    for e in enemy_list:
+        if tactic_state == 0:
+            if e.index < 2: e.current_behavior = "zigzag"
+            else: e.current_behavior = "chaser"
+        else:
+            if e.index < 2: e.current_behavior = "chaser"
+            else: e.current_behavior = "zigzag"
 
 
-def reset_game():
-    global enemies, score, GAME_STATE, spawn_timer
-    hero.reset()
-    enemies = []
-    score = 0
-    spawn_timer = 0
-    GAME_STATE = "MENU"
+def play_sound(snd_name):
+    if sound_enabled:
+        try:
+            if snd_name == 'click': sounds.click.play()
+            elif snd_name == 'hit': sounds.hit.play()
+        except: pass
+
+
+def manage_music():
+    """
+    Toca música APENAS se estiver no jogo (STATE_GAME) e som ligado.
+    Para a música se for ao Menu ou Game Over.
+    """
+    if sound_enabled and game_state == STATE_GAME:
+        if not music.is_playing('theme'):
+            try:
+                music.play('theme')
+                music.set_volume(0.3)
+            except: pass
+    else:
+        
+        if music.is_playing('theme'):
+            music.stop()
 
 
 def draw():
     screen.clear()
-    surf = screen.surface
-
-    if GAME_STATE == "MENU":
-        screen.fill((20, 20, 20))
-        screen.draw.text("Sobreviva aos inimigos!",
-                         center=(WIDTH // 2, 100),
-                         fontsize=44, color="white")
-        btn_start.draw(surf)
-        btn_sound.draw(surf)
-        btn_exit.draw(surf)
-
-    elif GAME_STATE == "GAME":
-        screen.fill((28, 28, 32))
-        hero.draw(surf)
+    
+    if game_state == STATE_MENU:
+        screen.fill(COLOR_BG_MENU)
+        screen.draw.text("SOBREVIVA", center=(WIDTH // 2, 150), fontsize=60, color="white")
+        btn_start.draw(screen)
+        btn_sound.draw(screen)
+        btn_exit.draw(screen)
+        
+    elif game_state == STATE_GAME:
+        screen.fill(COLOR_BG_GAME)
+        hero.draw()
         for e in enemies:
-            e.draw(surf)
-        screen.draw.text(f"Pontuação: {int(score)}", (10, 10), color="white", fontsize=32)
+            e.draw()
+        screen.draw.text(f"Pontos: {score}", (20, 20), fontsize=30, color="yellow")
 
+    elif game_state == STATE_GAMEOVER:
+        screen.fill(COLOR_BG_GAMEOVER)
+        screen.draw.text("GAME OVER", center=(WIDTH // 2, 200), fontsize=70, color="red")
+        screen.draw.text(f"Sua Pontuação Final: {score}", center=(WIDTH // 2, 300), fontsize=40, color="white")
+        btn_restart.draw(screen)
 
 def update():
-    global GAME_STATE, sound_enabled, score, enemies, spawn_timer
+    global game_state, score, score_timer, enemies
+    global tactic_timer, tactic_state
 
-    if GAME_STATE == "MENU":
-        if btn_start.is_clicked():
-            if sound_enabled: menu_sound.play()
+    manage_music()
+
+    if game_state == STATE_MENU:
+        pass
+
+    elif game_state == STATE_GAME:
+        hero.update()
+        
+        if len(enemies) == 0:
+            enemies = spawn_enemies()
+            tactic_timer = 0
+            tactic_state = 0
+
+        tactic_timer += 1
+        if tactic_timer >= TACTIC_INTERVAL:
+            tactic_timer = 0
+            tactic_state = 1 if tactic_state == 0 else 0
+            apply_tactics(enemies)
+
+        for e in enemies:
+            e.update_ai(hero)
+            if hero.colliderect(e):
+                play_sound('hit')
+                game_state = STATE_GAMEOVER
+
+        score_timer += 1
+        if score_timer >= 6:
+            score += 1
+            score_timer = 0
+
+    elif game_state == STATE_GAMEOVER:
+        pass
+
+def on_mouse_move(pos):
+    if game_state == STATE_MENU:
+        btn_start.update(pos)
+        btn_sound.update(pos)
+        btn_exit.update(pos)
+    elif game_state == STATE_GAMEOVER:
+        btn_restart.update(pos)
+
+def on_mouse_down(pos):
+    global game_state, sound_enabled, enemies, score, score_timer
+    
+    if game_state == STATE_MENU:
+        if btn_start.is_clicked(pos):
+            play_sound('click')
             hero.reset()
             enemies = []
             score = 0
-            spawn_timer = 0
-            GAME_STATE = "GAME"
-
-        if btn_sound.is_clicked():
+            score_timer = 0
+            game_state = STATE_GAME
+        if btn_sound.is_clicked(pos):
             sound_enabled = not sound_enabled
-            btn_sound.text = "Som ligado" if sound_enabled else "Som desligado"
+            btn_sound.text = f"Som: {'Ligado' if sound_enabled else 'Desligado'}"
+            play_sound('click')
+        if btn_exit.is_clicked(pos):
+            quit()
 
-        if btn_exit.is_clicked():
-            raise SystemExit
-
-    elif GAME_STATE == "GAME":
-
-
-        
-        if len(enemies) == 0:
-            spawn_timer += 1
-            if spawn_timer >= 60:   
-                enemies = random_enemy_bundle()
-
-        hero.update()
-        score += 1
-       
-        
-        global switch_timer, switch_interval
-
-        switch_timer += 1
-        if switch_timer >= switch_interval and enemies:
-            switch_timer = 0
-            switch_interval = randint(300, 600)  
-
-            e = choice(enemies)
-
-            if e.type == "static":
-                e.type = "chaser"
-                e.speed = 1.8
-            else:
-                e.type = "static"
-                e.speed = 0
-        
-        for e in enemies:
-            e.update(hero)
-
-            if abs((hero.x + 20) - (e.x + 17)) < 28 and abs((hero.y + 20) - (e.y + 17)) < 28:
-                if sound_enabled: hit_sound.play()
-                reset_game()
-                return
-
-def on_mouse_down(pos):
-    pass
+    elif game_state == STATE_GAMEOVER:
+        if btn_restart.is_clicked(pos):
+            play_sound('click')
+            
+            hero.reset()
+            enemies = []
+            score = 0
+            score_timer = 0
+            game_state = STATE_MENU
